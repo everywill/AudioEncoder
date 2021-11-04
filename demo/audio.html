@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+    <head>
+        <meta charset="utf-8">
+        <title>WebCodecs Audio Encode</title>
+        <style>
+            button {
+                background-color: #555555;
+                border: none;
+                color: white;
+                padding: 15px 32px;
+                width: 150px;
+                text-align: center;
+                display: block;
+                font-size: 16px;
+            }
+        </style>    
+    </head>
+  
+    <body>
+        <audio id="audio" controls></audio>
+        <script type="module">
+            import { XAudioEncoder, XAudioData } from "/src/index.js";
+            let times = 1;
+
+            const audioEl = document.getElementById('audio');
+     
+            function splitBuffer(buffer, byteLength) {
+                let result = [];
+                let channels = [];  // 拆分声道
+                let length = byteLength / (buffer.numberOfChannels * 2);
+                for (let i = 0; i < buffer.numberOfChannels; i++) {
+                    channels.push(buffer.getChannelData(i));
+                }
+                for (let offset = 0; offset < buffer.length; offset += length) {
+                    let len = Math.min(length, buffer.length - offset);
+                    let small_buf = new AudioBuffer({
+                        length: len,
+                        numberOfChannels: buffer.numberOfChannels,
+                        sampleRate: buffer.sampleRate
+                    });
+
+                    for (let i = 0; i < buffer.numberOfChannels; i++) {
+                        small_buf.copyToChannel(channels[i].slice(offset, offset + len), i);
+                    }
+                    result.push(small_buf);          
+                }
+                return result;
+            }
+
+            function concatBuffers (arrays) {
+                // Calculate byteSize from all arrays
+                const size = arrays.reduce((a,b) => a + b.byteLength, 0)
+                // Allcolate a new buffer
+                const result = new Uint8Array(size);
+                let offset = 0;
+                for (let i = 0; i < arrays.length; i++) {
+                    const arr = arrays[i];
+                    result.set(arr, offset);
+                    offset += arr.byteLength;
+                }
+                return result;
+            }
+      
+            async function main() {        
+                // 2 channels file
+                let raw_music_wav = await fetch("http://localhost:5000/demo/f92b40ba-41b8-4076-a8c7-f66c1ccfd371_news.wav");
+                
+                // One channel file
+                //let raw_music_wav = await fetch("https://cdn.glitch.com/f92b40ba-41b8-4076-a8c7-f66c1ccfd371%2Fmusic.wav?v=1616487361153");
+                const outputCtx = new AudioContext();
+                let music_buffer = await outputCtx.decodeAudioData(await raw_music_wav.arrayBuffer());
+                let sampleRate = music_buffer.sampleRate;         
+                
+                let total_encoded_size = 0;
+                const aacOutputs = [];
+
+                const decoder = new AudioDecoder({
+                    error(e) {
+                        console.log(e);
+                    },
+                    async output(audio_data) {                    
+                        const source = outputCtx.createBufferSource();
+                        source.buffer = new AudioBuffer({
+                            length: audio_data.numberOfFrames,
+                            numberOfChannels: audio_data.numberOfChannels,
+                            sampleRate: audio_data.sampleRate
+                        });
+                        for (let i = 0; i < audio_data.numberOfChannels; i++) {
+                            audio_data.copyTo(source.buffer.getChannelData(i), {
+                                planeIndex : i,
+                                frameOffset : 0,
+                                frameCount : audio_data.numberOfFrames,
+                                format : "f32-planar"
+                            });
+                        }
+                        source.connect(outputCtx.destination);
+                        source.start(audio_data.timestamp / 1000000); 
+                        audio_data.close();
+                    },
+                });
+
+                const encoder = new XAudioEncoder({
+                    error(e) {
+                        console.log(e);
+                    },
+                    output(chunk, metadata) {   
+                        total_encoded_size += chunk.byteLength;
+                        if (metadata.decoderConfig) {
+                            // decoder.configure(metadata.decoderConfig);
+                        }
+                        // decoder.decode(chunk);
+                        let chunkData = new Uint8Array(chunk.byteLength);
+                        chunk.copyTo(chunkData);
+                        aacOutputs.push(chunkData);
+                    },
+                });
+
+                const config = {
+                    numberOfChannels: music_buffer.numberOfChannels,
+                    sampleRate: sampleRate,
+                    codec: "opus",
+                    bitrate: 48000
+                };
+                
+                await encoder.configure(config);
+
+                let base_time = outputCtx.currentTime + 0.3;
+                let buffers = splitBuffer(music_buffer, 4096);
+                for (let buffer of buffers) {
+                    let data = new Int16Array(buffer.length * buffer.numberOfChannels);
+                    let channelOne = buffer.getChannelData(0);
+                    let channelTwo = buffer.getChannelData(1);
+                    for (let i = 0; i < buffer.length; i++) {
+                        data[i * 2] = channelOne[i] < 0 ? channelOne[i] * 0x8000 : channelOne[i] * 0x7FFF;
+                        data[i * 2 + 1] = channelTwo[i] < 0 ? channelTwo[i] * 0x8000 : channelTwo[i] * 0x7FFF;
+                    }
+                    let audio_data = new XAudioData({
+                        timestamp: base_time * 1000000,
+                        data: data,
+                        numberOfChannels: buffer.numberOfChannels,
+                        numberOfFrames: buffer.length,
+                        sampleRate: sampleRate,
+                        format: "s16",
+                    });
+
+                    base_time += buffer.duration;
+                    encoder.encode(audio_data);
+                }
+                await encoder.flush();
+                await encoder.close();
+                const r = concatBuffers(aacOutputs);
+                console.log(aacOutputs.length)
+                const url = URL.createObjectURL(new Blob([r], { type: "audio/opus" }));
+                audioEl.src = url;
+                audioEl.load();
+                // await decoder.flush();
+                // await decoder.close();
+                document.getElementById("total").innerText = "Total encoded size: " + total_encoded_size;
+            }   
+
+            window.main = main;
+        
+        </script>
+    
+        <button onclick="main()">Play</button>
+        <div id="total"></div>
+    </body>
+</html>

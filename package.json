@@ -1,0 +1,27 @@
+{
+  "name": "audio-encoder",
+  "version": "1.0.0",
+  "description": "AudioEncoder of WebCodec polyfill width fdk-aac and Webassembly",
+  "main": "src/index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "dev": "serve ."
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/everywill/AudioEncoder.git"
+  },
+  "keywords": [
+    "AudioEncoder",
+    "Webassembly"
+  ],
+  "author": "everywill",
+  "license": "UNLICENSED",
+  "bugs": {
+    "url": "https://github.com/everywill/AudioEncoder/issues"
+  },
+  "homepage": "https://github.com/everywill/AudioEncoder#readme",
+  "devDependencies": {
+    "serve": "^12.0.1"
+  }
+}
